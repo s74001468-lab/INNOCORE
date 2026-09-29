@@ -13,7 +13,10 @@ import {
   ChevronDown, 
   ChevronUp, 
   RefreshCw,
-  Server
+  Server,
+  QrCode,
+  X,
+  Camera
 } from 'lucide-react';
 import { playLockSound } from '../lib/sound';
 import { publishMeshEvent, getStoredLocks } from '../lib/meshBus';
@@ -25,6 +28,8 @@ export const GuestScreen: React.FC = () => {
   const [countdown, setCountdown] = useState(30);
   const [esiaExpanded, setEsiaExpanded] = useState(false);
   const [lockBattery, setLockBattery] = useState(94);
+  const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
+  const [qrScanningState, setQrScanningState] = useState<'scanning' | 'success'>('scanning');
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Sync state with lock #4 if modified remotely
@@ -70,24 +75,20 @@ export const GuestScreen: React.FC = () => {
     if (isProcessing) return;
 
     if (isUnlocked) {
-      // Manual relock tap
       handleRelock(false);
       return;
     }
 
-    // Unlocking process
     setIsProcessing(true);
     setStatusText('Поиск BLE-метки... Проверка крипто-ключа AES-128...');
 
     setTimeout(() => {
-      // Play procedural Web Audio click sound
       playLockSound('unlock');
 
       setIsUnlocked(true);
       setIsProcessing(false);
       setStatusText('ЗАМОК ОТКРЫТ • ДОБРО ПОЖАЛОВАТЬ');
 
-      // Publish event to BroadcastChannel & LocalStorage for B2B Dashboard
       publishMeshEvent({
         type: 'DOOR_UNLOCKED',
         unit: 'Домик #4',
@@ -109,6 +110,22 @@ export const GuestScreen: React.FC = () => {
       guest: isAuto ? 'Автосистема' : 'Сергей К.',
       details: isAuto ? 'Автоблокировка по таймеру (30 сек)' : 'Ручная защелка замка гостем'
     });
+  };
+
+  // QR Code Scanner Simulation trigger
+  const handleOpenQrScanner = () => {
+    setIsQrScannerOpen(true);
+    setQrScanningState('scanning');
+
+    setTimeout(() => {
+      setQrScanningState('success');
+      playLockSound('unlock');
+    }, 1800);
+  };
+
+  const handleConfirmQrUnlock = () => {
+    setIsQrScannerOpen(false);
+    handleUnlockTap();
   };
 
   return (
@@ -188,6 +205,26 @@ export const GuestScreen: React.FC = () => {
             </div>
           </div>
         </section>
+
+        {/* QR Code Quick Scan Button */}
+        <button
+          onClick={handleOpenQrScanner}
+          className="w-full bg-[#121214] hover:bg-[#18181B] border border-white/10 hover:border-[#FF4D00]/50 py-3 px-4 rounded-2xl flex items-center justify-between text-xs font-bold transition-all shadow-md group cursor-pointer"
+        >
+          <div className="flex items-center space-x-3">
+            <div className="p-2 rounded-xl bg-[#FF4D00]/10 border border-[#FF4D00]/30 text-[#FF5500] group-hover:scale-110 transition-transform">
+              <QrCode className="w-4 h-4" />
+            </div>
+            <div className="text-left">
+              <div className="text-white font-extrabold flex items-center space-x-1.5">
+                <span>Сканировать QR-код на замке</span>
+                <span className="text-[9px] bg-[#FF4D00] text-white px-1.5 py-0.2 rounded font-mono uppercase">быстрый вход</span>
+              </div>
+              <p className="text-[11px] text-zinc-400 font-normal">Приложите камеру к шильду домика</p>
+            </div>
+          </div>
+          <Camera className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
+        </button>
 
         {/* Zero-Frontdesk Verification Module */}
         <section className="bg-[#121214] border border-white/10 rounded-2xl p-3.5 transition-all">
@@ -332,6 +369,68 @@ export const GuestScreen: React.FC = () => {
         </section>
 
       </main>
+
+      {/* QR Code Scanner Camera Viewfinder Overlay Modal */}
+      {isQrScannerOpen && (
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col justify-between p-6 animate-fade-in">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center space-x-2">
+              <Camera className="w-5 h-5 text-[#FF4D00]" />
+              <span className="font-bold text-white text-sm">Сканер QR-кода InnoCore</span>
+            </div>
+            <button 
+              onClick={() => setIsQrScannerOpen(false)}
+              className="p-2 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Camera Viewfinder View */}
+          <div className="flex-1 flex flex-col items-center justify-center relative my-8">
+            <div className="w-64 h-64 border-2 border-[#FF4D00] rounded-3xl relative overflow-hidden bg-zinc-900/80 flex items-center justify-center shadow-2xl shadow-[#FF4D00]/40">
+              
+              {/* Corner Targets */}
+              <div className="absolute top-2 left-2 w-6 h-6 border-t-4 border-l-4 border-[#FF4D00]" />
+              <div className="absolute top-2 right-2 w-6 h-6 border-t-4 border-r-4 border-[#FF4D00]" />
+              <div className="absolute bottom-2 left-2 w-6 h-6 border-b-4 border-l-4 border-[#FF4D00]" />
+              <div className="absolute bottom-2 right-2 w-6 h-6 border-b-4 border-r-4 border-[#FF4D00]" />
+
+              {qrScanningState === 'scanning' ? (
+                <>
+                  {/* Laser Line */}
+                  <div className="w-full h-1 bg-[#FF4D00] shadow-[0_0_15px_#FF4D00] animate-bounce" />
+                  <p className="absolute bottom-4 text-[11px] text-zinc-400 font-mono animate-pulse">
+                    Наведите на QR замка...
+                  </p>
+                </>
+              ) : (
+                <div className="flex flex-col items-center text-center p-4">
+                  <CheckCircle2 className="w-14 h-14 text-emerald-400 animate-bounce mb-2" />
+                  <span className="text-sm font-extrabold text-white">ДОМИК #4 НАЙДЕН</span>
+                  <span className="text-[10px] text-zinc-400 font-mono mt-1">ID: INNOCORE-UNIT-04-BLE</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Footer controls in scanner modal */}
+          <div>
+            {qrScanningState === 'success' ? (
+              <button
+                onClick={handleConfirmQrUnlock}
+                className="w-full py-3.5 rounded-2xl bg-[#FF4D00] hover:bg-[#FF6611] text-white font-extrabold text-sm uppercase tracking-wider shadow-lg shadow-[#FF4D00]/50"
+              >
+                Открыть Домик #4
+              </button>
+            ) : (
+              <p className="text-center text-xs text-zinc-500 font-mono">
+                Сканирование дверной накладки / QR шильда
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Footer Info */}
       <footer className="pt-3 border-t border-white/10 flex items-center justify-between text-[11px] text-zinc-500 font-mono relative z-10">
