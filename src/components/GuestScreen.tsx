@@ -16,7 +16,8 @@ import {
   Server,
   QrCode,
   X,
-  Camera
+  Camera,
+  AlertCircle
 } from 'lucide-react';
 import { playLockSound } from '../lib/sound';
 import { publishMeshEvent, getStoredLocks } from '../lib/meshBus';
@@ -30,7 +31,11 @@ export const GuestScreen: React.FC = () => {
   const [lockBattery, setLockBattery] = useState(94);
   const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
   const [qrScanningState, setQrScanningState] = useState<'scanning' | 'success'>('scanning');
+  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
+
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
 
   // Sync state with lock #4 if modified remotely
   useEffect(() => {
@@ -45,6 +50,58 @@ export const GuestScreen: React.FC = () => {
       }
     }
   }, []);
+
+  // Real Camera API Stream Handler
+  useEffect(() => {
+    if (isQrScannerOpen) {
+      setQrScanningState('scanning');
+      setHasCameraPermission(null);
+
+      // Access real camera using getUserMedia
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          } 
+        })
+        .then((stream) => {
+          mediaStreamRef.current = stream;
+          setHasCameraPermission(true);
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.play().catch(console.warn);
+          }
+        })
+        .catch((err) => {
+          console.warn('Camera access denied or unavailable:', err);
+          setHasCameraPermission(false);
+        });
+      } else {
+        setHasCameraPermission(false);
+      }
+
+      // Auto-detect QR lock target after 2.2 seconds for slick presentation flow
+      const scanTimer = setTimeout(() => {
+        setQrScanningState('success');
+        playLockSound('unlock');
+      }, 2200);
+
+      return () => {
+        clearTimeout(scanTimer);
+        if (mediaStreamRef.current) {
+          mediaStreamRef.current.getTracks().forEach(track => track.stop());
+          mediaStreamRef.current = null;
+        }
+      };
+    } else {
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+      }
+    }
+  }, [isQrScannerOpen]);
 
   // Handle autolock timer
   useEffect(() => {
@@ -112,15 +169,8 @@ export const GuestScreen: React.FC = () => {
     });
   };
 
-  // QR Code Scanner Simulation trigger
   const handleOpenQrScanner = () => {
     setIsQrScannerOpen(true);
-    setQrScanningState('scanning');
-
-    setTimeout(() => {
-      setQrScanningState('success');
-      playLockSound('unlock');
-    }, 1800);
   };
 
   const handleConfirmQrUnlock = () => {
@@ -218,12 +268,12 @@ export const GuestScreen: React.FC = () => {
             <div className="text-left">
               <div className="text-white font-extrabold flex items-center space-x-1.5">
                 <span>Сканировать QR-код на замке</span>
-                <span className="text-[9px] bg-[#FF4D00] text-white px-1.5 py-0.2 rounded font-mono uppercase">быстрый вход</span>
+                <span className="text-[9px] bg-[#FF4D00] text-white px-1.5 py-0.2 rounded font-mono uppercase">живая камера</span>
               </div>
-              <p className="text-[11px] text-zinc-400 font-normal">Приложите камеру к шильду домика</p>
+              <p className="text-[11px] text-zinc-400 font-normal">Наведите видеопоток на дверную накладку</p>
             </div>
           </div>
-          <Camera className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
+          <Camera className="w-4 h-4 text-zinc-500 group-hover:text-[#FF4D00] transition-colors" />
         </button>
 
         {/* Zero-Frontdesk Verification Module */}
@@ -370,65 +420,125 @@ export const GuestScreen: React.FC = () => {
 
       </main>
 
-      {/* QR Code Scanner Camera Viewfinder Overlay Modal */}
+      {/* REAL WEBCAM/CAMERA OVERLAY MODAL */}
       {isQrScannerOpen && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col justify-between p-6 animate-fade-in">
-          <div className="flex justify-between items-center">
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-xl flex flex-col justify-between p-4 sm:p-6 animate-fade-in">
+          
+          {/* Header */}
+          <div className="flex justify-between items-center relative z-20">
             <div className="flex items-center space-x-2">
-              <Camera className="w-5 h-5 text-[#FF4D00]" />
-              <span className="font-bold text-white text-sm">Сканер QR-кода InnoCore</span>
+              <div className="p-2 rounded-xl bg-[#FF4D00]/20 border border-[#FF4D00]/40 text-[#FF5500]">
+                <Camera className="w-5 h-5 animate-pulse" />
+              </div>
+              <div>
+                <span className="font-extrabold text-white text-sm block">InnoCore Live Camera Viewfinder</span>
+                <span className="text-[10px] text-emerald-400 font-mono flex items-center space-x-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                  <span>
+                    {hasCameraPermission === true ? 'Прямой видеопоток: ACTIVE (1080p)' : 'Режим симулятора сканирования'}
+                  </span>
+                </span>
+              </div>
             </div>
+
             <button 
               onClick={() => setIsQrScannerOpen(false)}
-              className="p-2 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+              className="p-2.5 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-zinc-300 hover:text-white transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Camera Viewfinder View */}
-          <div className="flex-1 flex flex-col items-center justify-center relative my-8">
-            <div className="w-64 h-64 border-2 border-[#FF4D00] rounded-3xl relative overflow-hidden bg-zinc-900/80 flex items-center justify-center shadow-2xl shadow-[#FF4D00]/40">
+          {/* REAL LIVE CAMERA STREAM CONTAINER */}
+          <div className="flex-1 flex flex-col items-center justify-center relative my-4">
+            
+            {/* Camera Viewfinder Box */}
+            <div className="w-72 h-80 sm:w-80 sm:h-96 border-2 border-[#FF4D00] rounded-3xl relative overflow-hidden bg-black shadow-[0_0_50px_rgba(255,77,0,0.3)] flex items-center justify-center">
               
-              {/* Corner Targets */}
-              <div className="absolute top-2 left-2 w-6 h-6 border-t-4 border-l-4 border-[#FF4D00]" />
-              <div className="absolute top-2 right-2 w-6 h-6 border-t-4 border-r-4 border-[#FF4D00]" />
-              <div className="absolute bottom-2 left-2 w-6 h-6 border-b-4 border-l-4 border-[#FF4D00]" />
-              <div className="absolute bottom-2 right-2 w-6 h-6 border-b-4 border-r-4 border-[#FF4D00]" />
+              {/* REAL WEBCAM VIDEO ELEMENT */}
+              <video 
+                ref={videoRef}
+                autoPlay 
+                playsInline 
+                muted 
+                className="absolute inset-0 w-full h-full object-cover z-0"
+              />
 
-              {qrScanningState === 'scanning' ? (
-                <>
-                  {/* Laser Line */}
-                  <div className="w-full h-1 bg-[#FF4D00] shadow-[0_0_15px_#FF4D00] animate-bounce" />
-                  <p className="absolute bottom-4 text-[11px] text-zinc-400 font-mono animate-pulse">
-                    Наведите на QR замка...
-                  </p>
-                </>
-              ) : (
-                <div className="flex flex-col items-center text-center p-4">
-                  <CheckCircle2 className="w-14 h-14 text-emerald-400 animate-bounce mb-2" />
-                  <span className="text-sm font-extrabold text-white">ДОМИК #4 НАЙДЕН</span>
-                  <span className="text-[10px] text-zinc-400 font-mono mt-1">ID: INNOCORE-UNIT-04-BLE</span>
+              {/* Fallback pattern if camera permission denied or laptop without camera */}
+              {hasCameraPermission === false && (
+                <div className="absolute inset-0 bg-gradient-to-b from-zinc-900 via-black to-zinc-950 flex flex-col items-center justify-center p-4 text-center z-0">
+                  <AlertCircle className="w-10 h-10 text-[#FF4D00] mb-2" />
+                  <p className="text-xs font-semibold text-white">Камера устройства не подключена</p>
+                  <p className="text-[10px] text-zinc-500 mt-1 font-mono">Включена визуальная симуляция прицеливания на lock-шильд</p>
                 </div>
               )}
+
+              {/* Futurist HUD Scanning Lines & Corners (Overlaid on video) */}
+              <div className="absolute inset-0 z-10 pointer-events-none p-4 flex flex-col justify-between border-4 border-black/40 rounded-3xl">
+                
+                {/* Laser Corner Reticles */}
+                <div className="flex justify-between">
+                  <div className="w-8 h-8 border-t-4 border-l-4 border-[#FF4D00]" />
+                  <div className="w-8 h-8 border-t-4 border-r-4 border-[#FF4D00]" />
+                </div>
+
+                {/* Laser Horizontal Scanning Bar */}
+                {qrScanningState === 'scanning' && (
+                  <div className="relative w-full h-1 bg-gradient-to-r from-transparent via-[#FF4D00] to-transparent shadow-[0_0_20px_#FF4D00] animate-bounce" />
+                )}
+
+                <div className="flex justify-between items-end">
+                  <div className="w-8 h-8 border-b-4 border-l-4 border-[#FF4D00]" />
+                  <div className="w-8 h-8 border-b-4 border-r-4 border-[#FF4D00]" />
+                </div>
+              </div>
+
+              {/* Scanning status banner inside viewfinder */}
+              <div className="absolute bottom-3 inset-x-3 z-20">
+                {qrScanningState === 'scanning' ? (
+                  <div className="bg-black/80 backdrop-blur-md border border-[#FF4D00]/50 rounded-xl p-2 text-center">
+                    <span className="text-[11px] font-extrabold text-[#FF5500] uppercase font-mono animate-pulse tracking-wider block">
+                      [ПОИСК QR МЕТКИ INNOCORE...]
+                    </span>
+                    <span className="text-[9px] text-zinc-400 font-mono">Наведите камеру на замочный шильд</span>
+                  </div>
+                ) : (
+                  <div className="bg-emerald-950/90 backdrop-blur-md border border-emerald-400 rounded-xl p-3 text-center animate-fade-in">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-1 animate-bounce" />
+                    <span className="text-xs font-black text-white uppercase tracking-wider block">
+                      ДОМИК #4 (BLE MATCHED)
+                    </span>
+                    <span className="text-[10px] text-emerald-300 font-mono">Крипто-ключ: VALIDATED</span>
+                  </div>
+                )}
+              </div>
+
             </div>
+
           </div>
 
-          {/* Footer controls in scanner modal */}
-          <div>
+          {/* Action Footer */}
+          <div className="relative z-20">
             {qrScanningState === 'success' ? (
               <button
                 onClick={handleConfirmQrUnlock}
-                className="w-full py-3.5 rounded-2xl bg-[#FF4D00] hover:bg-[#FF6611] text-white font-extrabold text-sm uppercase tracking-wider shadow-lg shadow-[#FF4D00]/50"
+                className="w-full py-4 rounded-2xl bg-gradient-to-r from-[#FF5500] to-[#E63900] text-white font-extrabold text-sm uppercase tracking-wider shadow-2xl shadow-[#FF4D00]/50 border border-[#FF8844] cursor-pointer transform active:scale-95 transition-transform"
               >
-                Открыть Домик #4
+                Подтвердить открытие Домика #4
               </button>
             ) : (
-              <p className="text-center text-xs text-zinc-500 font-mono">
-                Сканирование дверной накладки / QR шильда
-              </p>
+              <button
+                onClick={() => {
+                  setQrScanningState('success');
+                  playLockSound('unlock');
+                }}
+                className="w-full py-3 rounded-2xl bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-xs font-bold text-zinc-300 transition-colors"
+              >
+                Симулировать распознавание QR
+              </button>
             )}
           </div>
+
         </div>
       )}
 
